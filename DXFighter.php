@@ -100,6 +100,13 @@ class DXFighter {
   );
 
   /**
+   * Group code => 'float' or 'integer', built once from the ranges above.
+   *
+   * @var array|null
+   */
+  private static $groupValueTypes = null;
+
+  /**
    * DXFighter constructor.
    * sets basic values needed for further usage if the init flag is set
    *
@@ -307,16 +314,19 @@ class DXFighter {
    * @throws \UnexpectedValueException
    */
   private function assertValidGroupValues($output) {
+    $types = self::groupValueTypes();
     $lines = explode(PHP_EOL, $output);
     $lineCount = count($lines);
     $entity = '';
     $handle = '';
     for ($i = 0; $i < $lineCount; $i += 2) {
-      $where = $entity . ($handle === '' ? '' : ' (handle ' . $handle . ')');
-      if (!preg_match('/^\d+$/', $lines[$i]) || $i + 1 === $lineCount) {
-        throw new \UnexpectedValueException(sprintf('Invalid group code "%s" in %s', $lines[$i], $where));
-      }
       $code = (int) $lines[$i];
+      // Only digits survive the round trip through int, nothing else
+      if ((string) $code !== $lines[$i] || $i + 1 === $lineCount) {
+        throw new \UnexpectedValueException(sprintf(
+          'Invalid group code "%s" in %s', $lines[$i], self::describeEntity($entity, $handle)
+        ));
+      }
       $value = $lines[$i + 1];
       if ($code === 0) {
         $entity = $value;
@@ -326,26 +336,45 @@ class DXFighter {
       if ($code === 5) {
         $handle = $value;
       }
-      $isInteger = self::inGroupCodeRanges($code, self::$integerGroupCodes);
-      $isFloat = self::inGroupCodeRanges($code, self::$floatGroupCodes);
-      if (($isInteger && !preg_match('/^-?\d+$/', trim($value))) || ($isFloat && !is_numeric($value))) {
-        throw new \UnexpectedValueException(sprintf('Invalid value "%s" for group code %d in %s', $value, $code, $where));
+      if (!isset($types[$code])) {
+        continue;
+      }
+      $valid = $types[$code] === 'float'
+        ? is_numeric($value)
+        : preg_match('/^-?\d+$/', trim($value)) === 1;
+      if (!$valid) {
+        throw new \UnexpectedValueException(sprintf(
+          'Invalid value "%s" for group code %d in %s', $value, $code, self::describeEntity($entity, $handle)
+        ));
       }
     }
   }
 
   /**
-   * @param int $code
-   * @param array $ranges
-   * @return bool
+   * @return array group code => 'float' or 'integer'
    */
-  private static function inGroupCodeRanges($code, $ranges) {
-    foreach ($ranges as $range) {
-      if ($code >= $range[0] && $code <= $range[1]) {
-        return true;
+  private static function groupValueTypes() {
+    if (self::$groupValueTypes === null) {
+      self::$groupValueTypes = array();
+      $ranges = array('float' => self::$floatGroupCodes, 'integer' => self::$integerGroupCodes);
+      foreach ($ranges as $type => $codeRanges) {
+        foreach ($codeRanges as $range) {
+          for ($code = $range[0]; $code <= $range[1]; $code++) {
+            self::$groupValueTypes[$code] = $type;
+          }
+        }
       }
     }
-    return false;
+    return self::$groupValueTypes;
+  }
+
+  /**
+   * @param string $entity
+   * @param string $handle
+   * @return string
+   */
+  private static function describeEntity($entity, $handle) {
+    return $entity . ($handle === '' ? '' : ' (handle ' . $handle . ')');
   }
 
   /**
