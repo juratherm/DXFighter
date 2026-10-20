@@ -287,12 +287,64 @@ class DXFighter {
    *
    * @param $fileName
    * @return $absolutePath
+   * @throws \UnexpectedValueException if the content is not valid UTF-8
+   * @throws \RuntimeException if the file cannot be written
    */
   public function saveAs($fileName) {
-    $fh = fopen($fileName, 'w');
-    fwrite($fh, iconv("UTF-8", "WINDOWS-1252", $this->toString(FALSE)));
+    $content = $this->toWindows1252($this->toString(FALSE));
+    error_clear_last();
+    $fh = @fopen($fileName, 'w');
+    if ($fh === false) {
+      throw new \RuntimeException('Cannot open ' . $fileName . ' for writing: ' . $this->lastErrorMessage());
+    }
+    $written = @fwrite($fh, $content);
     fclose($fh);
+    if ($written !== strlen($content)) {
+      throw new \RuntimeException('Could not write all of ' . $fileName . ': ' . $this->lastErrorMessage());
+    }
     return realpath($fileName);
+  }
+
+  /**
+   * Converts the UTF-8 content to Windows-1252, the code page the header
+   * declares ($DWGCODEPAGE ANSI_1252).
+   *
+   * Characters Windows-1252 lacks are written as \U+XXXX, the escape AutoCAD
+   * itself writes into DXF files of this version, so CAD programs show them
+   * again. iconv() alone gives up on the first such character and returns
+   * false, which used to leave an empty file. The escape has four hex digits,
+   * so characters beyond U+FFFF become a question mark.
+   *
+   * @param string $content
+   * @return string
+   * @throws \UnexpectedValueException
+   */
+  private function toWindows1252($content) {
+    // Everything except ASCII, Latin-1 U+00A0-U+00FF and the 27 characters
+    // Windows-1252 keeps in 0x80-0x9F
+    $missing = '/[^\x{00}-\x{7F}\x{A0}-\x{FF}\x{152}\x{153}\x{160}\x{161}\x{178}\x{17D}\x{17E}\x{192}'
+      . '\x{2C6}\x{2DC}\x{2013}\x{2014}\x{2018}-\x{201A}\x{201C}-\x{201E}\x{2020}-\x{2022}'
+      . '\x{2026}\x{2030}\x{2039}\x{203A}\x{20AC}\x{2122}]/u';
+    $escaped = preg_replace_callback($missing, function ($match) {
+      $codePoint = unpack('N', iconv('UTF-8', 'UTF-32BE', $match[0]))[1];
+      return $codePoint > 0xFFFF ? '?' : sprintf('\\U+%04X', $codePoint);
+    }, $content);
+    if ($escaped === null) {
+      throw new \UnexpectedValueException('The DXF content is not valid UTF-8');
+    }
+    $converted = iconv('UTF-8', 'WINDOWS-1252', $escaped);
+    if ($converted === false) {
+      throw new \UnexpectedValueException('The DXF content could not be converted to Windows-1252');
+    }
+    return $converted;
+  }
+
+  /**
+   * @return string
+   */
+  private function lastErrorMessage() {
+    $error = error_get_last();
+    return $error === null ? 'unknown error' : $error['message'];
   }
 
   private function read($path, $move = [0,0,0], $rotate = 0) {
