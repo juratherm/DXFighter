@@ -36,6 +36,15 @@ final class GroupValueTest extends TestCase {
     ];
   }
 
+  public function testRefusesATextWhoseLineBreakShiftsTheGroupCodes(): void {
+    $dxf = new DXFighter();
+    $dxf->addEntity(new Text("Zeile 1\nZeile 2", array(0, 0, 0), 10));
+
+    $this->expectException(UnexpectedValueException::class);
+    $this->expectExceptionMessageMatches('/"Zeile 2".*\bTEXT\b/');
+    $dxf->toString(FALSE);
+  }
+
   public function testRefusesAFractionForAnIntegerGroupCode(): void {
     $dxf = new DXFighter();
     $line = new Line(array(0, 0, 0), array(10, 0, 0));
