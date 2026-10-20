@@ -74,7 +74,8 @@ class BasicObject {
     $output = array();
     $groupCode = 10 + $offset;
     foreach ($point as $value) {
-      array_push($output, $groupCode, sprintf("%.3f", $value));
+      // %F, unlike %f, ignores the locale: DXF wants a decimal point, never a comma
+      array_push($output, $groupCode, sprintf("%.3F", $value));
       $groupCode += 10;
     }
     return implode(PHP_EOL, $output);

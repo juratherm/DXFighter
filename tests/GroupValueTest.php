@@ -65,6 +65,19 @@ final class GroupValueTest extends TestCase {
     ];
   }
 
+  public function testWritesCoordinatesWithADecimalPointInAGermanLocale(): void {
+    $previous = setlocale(LC_NUMERIC, 0);
+    if (setlocale(LC_NUMERIC, 'de_DE.UTF-8', 'de_DE', 'deu_deu') === false) {
+      $this->markTestSkipped('No German locale installed');
+    }
+    try {
+      $point = new Point(array(1.5, -2.25, 0));
+      $this->assertStringContainsString("\n10\n1.500\n20\n-2.250\n30\n0.000\n", $point->render());
+    } finally {
+      setlocale(LC_NUMERIC, $previous);
+    }
+  }
+
   public function testWritesADrawingWithEveryEntityType(): void {
     $dxf = new DXFighter();
     $dxf->addEntity(new Line(array(0, 0, 0), array(10.5, -3, 0)));
