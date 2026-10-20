@@ -366,7 +366,10 @@ class DXFighter {
     $written = @fwrite($fh, $content);
     fclose($fh);
     if ($written !== strlen($content)) {
-      throw new \RuntimeException('Could not write all of ' . $fileName . ': ' . $this->lastErrorMessage());
+      $error = $this->lastErrorMessage();
+      // A half-written drawing must not stay where the complete one is expected
+      @unlink($fileName);
+      throw new \RuntimeException('Could not write all of ' . $fileName . ': ' . $error);
     }
     return realpath($fileName);
   }

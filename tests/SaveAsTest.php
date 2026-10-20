@@ -60,12 +60,26 @@ final class SaveAsTest extends TestCase {
       stream_wrapper_unregister('dxfighter-full-disk');
     }
   }
+
+  public function testRemovesTheFileItCouldNotWriteCompletely(): void {
+    stream_wrapper_register('dxfighter-full-disk', FullDiskStream::class);
+    FullDiskStream::$removed = array();
+    try {
+      (new DXFighter())->saveAs('dxfighter-full-disk://drawing.dxf');
+      $this->fail('saveAs() should have thrown');
+    } catch (RuntimeException $e) {
+      $this->assertSame(array('dxfighter-full-disk://drawing.dxf'), FullDiskStream::$removed);
+    } finally {
+      stream_wrapper_unregister('dxfighter-full-disk');
+    }
+  }
 }
 
 /**
  * A stream that opens fine but takes no bytes, like a full disk.
  */
 final class FullDiskStream {
+  public static $removed = array();
   public $context;
 
   public function stream_open($path, $mode, $options, &$openedPath) {
@@ -77,5 +91,10 @@ final class FullDiskStream {
   }
 
   public function stream_close() {
+  }
+
+  public function unlink($path) {
+    self::$removed[] = $path;
+    return true;
   }
 }
