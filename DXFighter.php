@@ -88,6 +88,18 @@ class DXFighter {
   protected $thumbnailImage;
 
   /**
+   * Group code ranges whose values are numbers, after the "Group code value
+   * types" of the DXF reference. Every other group code carries a string.
+   */
+  private static $floatGroupCodes = array(
+    array(10, 59), array(110, 149), array(210, 239), array(460, 469), array(1010, 1059)
+  );
+  private static $integerGroupCodes = array(
+    array(60, 79), array(90, 99), array(160, 179), array(270, 299), array(370, 389),
+    array(400, 409), array(420, 429), array(440, 459), array(1060, 1071)
+  );
+
+  /**
    * DXFighter constructor.
    * sets basic values needed for further usage if the init flag is set
    *
@@ -273,6 +285,7 @@ class DXFighter {
     }
     array_push($output, 0, "EOF");
     $outputString = implode(PHP_EOL, $output);
+    $this->assertValidGroupValues($outputString);
 
     if ($return) {
       echo nl2br($outputString);
@@ -280,6 +293,59 @@ class DXFighter {
     } else {
       return $outputString;
     }
+  }
+
+  /**
+   * Checks every group code and value pair of the rendered DXF.
+   *
+   * PHP writes false and null as an empty line and NAN as "NAN". Under a
+   * numeric group code that makes CAD programs refuse the whole file, so
+   * it is better to fail here and name the entity than to hand out a
+   * drawing nobody can open.
+   *
+   * @param string $output
+   * @throws \UnexpectedValueException
+   */
+  private function assertValidGroupValues($output) {
+    $lines = explode(PHP_EOL, $output);
+    $lineCount = count($lines);
+    $entity = '';
+    $handle = '';
+    for ($i = 0; $i < $lineCount; $i += 2) {
+      $where = $entity . ($handle === '' ? '' : ' (handle ' . $handle . ')');
+      if (!preg_match('/^\d+$/', $lines[$i]) || $i + 1 === $lineCount) {
+        throw new \UnexpectedValueException(sprintf('Invalid group code "%s" in %s', $lines[$i], $where));
+      }
+      $code = (int) $lines[$i];
+      $value = $lines[$i + 1];
+      if ($code === 0) {
+        $entity = $value;
+        $handle = '';
+        continue;
+      }
+      if ($code === 5) {
+        $handle = $value;
+      }
+      $isInteger = self::inGroupCodeRanges($code, self::$integerGroupCodes);
+      $isFloat = self::inGroupCodeRanges($code, self::$floatGroupCodes);
+      if (($isInteger && !preg_match('/^-?\d+$/', trim($value))) || ($isFloat && !is_numeric($value))) {
+        throw new \UnexpectedValueException(sprintf('Invalid value "%s" for group code %d in %s', $value, $code, $where));
+      }
+    }
+  }
+
+  /**
+   * @param int $code
+   * @param array $ranges
+   * @return bool
+   */
+  private static function inGroupCodeRanges($code, $ranges) {
+    foreach ($ranges as $range) {
+      if ($code >= $range[0] && $code <= $range[1]) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
