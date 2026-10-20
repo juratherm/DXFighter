@@ -19,7 +19,7 @@ final class PolylineTest extends TestCase {
     $polyline->addPoint(array(50,-86.6,0));
 
     $id = $polyline->getHandle();
-    $this->assertInternalType("int", hexdec($id));
+    $this->assertIsInt(hexdec($id));
     $this->assertGreaterThan(0, hexdec($id));
 
     $this->assertEquals(

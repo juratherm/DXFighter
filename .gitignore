@@ -2,3 +2,4 @@ vendor
 style-report
 *.dxf
 .idea
+.phpunit.result.cache
