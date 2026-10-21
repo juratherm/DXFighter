@@ -110,10 +110,10 @@ class Entity extends BasicObject {
   /**
    * Public function to define if a object should belong to paper space
    *
-   * @param $ps 0|1
+   * @param $ps 0|1|bool
    */
   public function setPaperSpace($ps) {
-    $this->paperSpace = $ps;
+    $this->paperSpace = $ps ? 1 : 0;
     return $this;
   }
 
@@ -132,10 +132,10 @@ class Entity extends BasicObject {
   /**
    * Public function to hide an entity
    *
-   * @param $hidden
+   * @param $hidden 0|1|bool
    */
   public function hide($hidden) {
-    $this->hidden = $hidden;
+    $this->hidden = $hidden ? 1 : 0;
     return $this;
   }
 

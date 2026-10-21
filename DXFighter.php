@@ -88,6 +88,25 @@ class DXFighter {
   protected $thumbnailImage;
 
   /**
+   * Group code ranges whose values are numbers, after the "Group code value
+   * types" of the DXF reference. Every other group code carries a string.
+   */
+  private static $floatGroupCodes = array(
+    array(10, 59), array(110, 149), array(210, 239), array(460, 469), array(1010, 1059)
+  );
+  private static $integerGroupCodes = array(
+    array(60, 79), array(90, 99), array(160, 179), array(270, 299), array(370, 389),
+    array(400, 409), array(420, 429), array(440, 459), array(1060, 1071)
+  );
+
+  /**
+   * Group code => 'float' or 'integer', built once from the ranges above.
+   *
+   * @var array|null
+   */
+  private static $groupValueTypes = null;
+
+  /**
    * DXFighter constructor.
    * sets basic values needed for further usage if the init flag is set
    *
@@ -273,6 +292,7 @@ class DXFighter {
     }
     array_push($output, 0, "EOF");
     $outputString = implode(PHP_EOL, $output);
+    $this->assertValidGroupValues($outputString);
 
     if ($return) {
       echo nl2br($outputString);
@@ -283,16 +303,146 @@ class DXFighter {
   }
 
   /**
+   * Checks every group code and value pair of the rendered DXF.
+   *
+   * PHP writes false and null as an empty line and NAN as "NAN". Under a
+   * numeric group code that makes CAD programs refuse the whole file, so
+   * it is better to fail here and name the entity than to hand out a
+   * drawing nobody can open.
+   *
+   * @param string $output
+   * @throws \UnexpectedValueException
+   */
+  private function assertValidGroupValues($output) {
+    $types = self::groupValueTypes();
+    $lines = explode(PHP_EOL, $output);
+    $lineCount = count($lines);
+    $entity = '';
+    $handle = '';
+    for ($i = 0; $i < $lineCount; $i += 2) {
+      $code = (int) $lines[$i];
+      // Only digits survive the round trip through int, nothing else
+      if ((string) $code !== $lines[$i] || $i + 1 === $lineCount) {
+        throw new \UnexpectedValueException(sprintf(
+          'Invalid group code "%s" in %s', $lines[$i], self::describeEntity($entity, $handle)
+        ));
+      }
+      $value = $lines[$i + 1];
+      if ($code === 0) {
+        $entity = $value;
+        $handle = '';
+        continue;
+      }
+      if ($code === 5) {
+        $handle = $value;
+      }
+      if (!isset($types[$code])) {
+        continue;
+      }
+      $valid = $types[$code] === 'float'
+        ? is_numeric($value)
+        : preg_match('/^-?\d+$/', trim($value)) === 1;
+      if (!$valid) {
+        throw new \UnexpectedValueException(sprintf(
+          'Invalid value "%s" for group code %d in %s', $value, $code, self::describeEntity($entity, $handle)
+        ));
+      }
+    }
+  }
+
+  /**
+   * @return array group code => 'float' or 'integer'
+   */
+  private static function groupValueTypes() {
+    if (self::$groupValueTypes === null) {
+      self::$groupValueTypes = array();
+      $ranges = array('float' => self::$floatGroupCodes, 'integer' => self::$integerGroupCodes);
+      foreach ($ranges as $type => $codeRanges) {
+        foreach ($codeRanges as $range) {
+          for ($code = $range[0]; $code <= $range[1]; $code++) {
+            self::$groupValueTypes[$code] = $type;
+          }
+        }
+      }
+    }
+    return self::$groupValueTypes;
+  }
+
+  /**
+   * @param string $entity
+   * @param string $handle
+   * @return string
+   */
+  private static function describeEntity($entity, $handle) {
+    return $entity . ($handle === '' ? '' : ' (handle ' . $handle . ')');
+  }
+
+  /**
    * Save the DXF to a specific place
    *
    * @param $fileName
    * @return $absolutePath
+   * @throws \UnexpectedValueException if the content is not valid UTF-8
+   * @throws \RuntimeException if the file cannot be written
    */
   public function saveAs($fileName) {
-    $fh = fopen($fileName, 'w');
-    fwrite($fh, iconv("UTF-8", "WINDOWS-1252", $this->toString(FALSE)));
+    $content = $this->toWindows1252($this->toString(FALSE));
+    error_clear_last();
+    $fh = @fopen($fileName, 'w');
+    if ($fh === false) {
+      throw new \RuntimeException('Cannot open ' . $fileName . ' for writing: ' . $this->lastErrorMessage());
+    }
+    $written = @fwrite($fh, $content);
     fclose($fh);
+    if ($written !== strlen($content)) {
+      $error = $this->lastErrorMessage();
+      // A half-written drawing must not stay where the complete one is expected
+      @unlink($fileName);
+      throw new \RuntimeException('Could not write all of ' . $fileName . ': ' . $error);
+    }
     return realpath($fileName);
+  }
+
+  /**
+   * Converts the UTF-8 content to Windows-1252, the code page the header
+   * declares ($DWGCODEPAGE ANSI_1252).
+   *
+   * Characters Windows-1252 lacks are written as \U+XXXX, the escape AutoCAD
+   * itself writes into DXF files of this version, so CAD programs show them
+   * again. iconv() alone gives up on the first such character and returns
+   * false, which used to leave an empty file. The escape has four hex digits,
+   * so characters beyond U+FFFF become a question mark.
+   *
+   * @param string $content
+   * @return string
+   * @throws \UnexpectedValueException
+   */
+  private function toWindows1252($content) {
+    // Everything except ASCII, Latin-1 U+00A0-U+00FF and the 27 characters
+    // Windows-1252 keeps in 0x80-0x9F
+    $missing = '/[^\x{00}-\x{7F}\x{A0}-\x{FF}\x{152}\x{153}\x{160}\x{161}\x{178}\x{17D}\x{17E}\x{192}'
+      . '\x{2C6}\x{2DC}\x{2013}\x{2014}\x{2018}-\x{201A}\x{201C}-\x{201E}\x{2020}-\x{2022}'
+      . '\x{2026}\x{2030}\x{2039}\x{203A}\x{20AC}\x{2122}]/u';
+    $escaped = preg_replace_callback($missing, function ($match) {
+      $codePoint = unpack('N', iconv('UTF-8', 'UTF-32BE', $match[0]))[1];
+      return $codePoint > 0xFFFF ? '?' : sprintf('\\U+%04X', $codePoint);
+    }, $content);
+    if ($escaped === null) {
+      throw new \UnexpectedValueException('The DXF content is not valid UTF-8');
+    }
+    $converted = iconv('UTF-8', 'WINDOWS-1252', $escaped);
+    if ($converted === false) {
+      throw new \UnexpectedValueException('The DXF content could not be converted to Windows-1252');
+    }
+    return $converted;
+  }
+
+  /**
+   * @return string
+   */
+  private function lastErrorMessage() {
+    $error = error_get_last();
+    return $error === null ? 'unknown error' : $error['message'];
   }
 
   private function read($path, $move = [0,0,0], $rotate = 0) {

@@ -13,7 +13,7 @@ final class CircleTest extends TestCase {
     );
 
     $id = $circle->getHandle();
-    $this->assertInternalType("int", hexdec($id));
+    $this->assertIsInt(hexdec($id));
     $this->assertGreaterThan(0, hexdec($id));
 
     $this->assertEquals(
